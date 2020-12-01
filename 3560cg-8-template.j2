@@ -1,0 +1,204 @@
+!
+!#########################
+!  3560cg-8-template.j2
+!########################
+!Configuration for Device: {{hostname}} MGMT IP: {{mgmt_ip}}
+! Remember to capture all session out
+! Change MM-DD-YYYY to read the date of configuration (Example: 01-12-2020)
+! Name your file: {{hostname}}-session-MM-DD-YYYY.txt
+!
+!###-  Backup running configuration to local flash/bootflash -###
+! Change MM-DD-YYYY to read the date of configuration (Example: 01-12-2020)
+! copy running-config flash:/{{hostname}}-cfg-MM-DD-YYYY.txt
+!
+!-> Capture Pre-Configuration "shows"
+terminal length 0
+show  run
+show  cdp neighbors
+show  cdp neighbors detail
+show  inventory
+show  module
+show  version
+show  ip arp
+show  mac address-table
+show  interface status
+show clock
+terminal length 24
+
+
+!###- DO NOT START UNTILL THE PING SWEEP IS COMPLETED -###
+
+!###- START CONFIGURATION -###
+
+username {{testuser}} secret 0 {{password}}
+
+radius server {{ise_psn_hostname_1}}
+  address ipv4 {{ise_psn_ip_1}} auth-port 1812 acct-port 1813
+  key {{radius_key}}
+  automate-tester username {{testuser}} ignore-acct-port idle-time 10
+
+radius server {{ise_psn_hostname_2}}
+  address ipv4 {{ise_psn_ip_2}} auth-port 1812 acct-port 1813
+  key {{radius_key}}
+  automate-tester username {{testuser}} ignore-acct-port idle-time 10
+
+aaa group server radius {{radius_group}}
+  server name {{ise_psn_hostname_1}}
+  server name {{ise_psn_hostname_2}}
+
+ip radius source-interface {{mgmt_interface}}
+
+aaa new-model
+aaa session-id common
+aaa authentication dot1x default group {{radius_group}}
+aaa authorization network default group {{radius_group}}
+aaa accounting dot1x default start-stop group {{radius_group}}
+aaa accounting update newinfo periodic 2880
+
+radius-server dead-criteria time 10 tries 3
+radius-server deadtime 15
+
+authentication critical recovery delay 1000
+radius-server attribute 6 on-for-login-auth
+radius-server attribute 8 include-in-access-req
+radius-server attribute 25 access-request include
+radius-server attribute 31 mac format ietf upper-case
+radius-server attribute 31 send nas-port-detail mac-only
+
+radius-server vsa send authentication
+radius-server vsa send accounting
+
+aaa server radius dynamic-author
+  client {{ise_psn_ip_1}} server-key 0 {{radius_key}}
+  client {{ise_psn_ip_2}} server-key 0 {{radius_key}}
+exit
+exit
+
+!### - STOP TEST RADIUS-###
+!### - STOP TEST RADIUS-###
+  test aaa group {{radius_group}} server {{ise_psn_ip_1}} {{testuser}} {{password}} legacy
+  test aaa group {{radius_group}} server {{ise_psn_ip_2}} {{testuser}} {{password}} legacy
+
+
+authentication mac-move permit
+dot1x system-auth-control
+dot1x critical eapol
+epm access-control open
+
+! Logging
+!-removed 2-3-2020
+!epm logging
+!-removed 2-3-2020
+!logging monitor informational
+logging origin-id ip
+logging source-interface {{mgmt_interface}}
+logging host 207.130.185.233 transport udp port 20514
+logging host 207.130.185.234 transport udp port 20514
+logging discriminator DOT1X mnemonics drops (FAIL)
+logging buffered discriminator DOT1X 51200
+
+! SMNP
+mac address-table notification change
+mac address-table notification mac-move
+mac address-table notification change interval 0
+snmp-server enable traps mac-notification change move threshold
+snmp-server enable traps mac-notification change
+snmp-server host {{ise_psn_ip_1}} version 2c jkti5ht8ep90 mac-notification
+snmp-server host {{ise_psn_ip_2}} version 2c jkti5ht8ep90 mac-notification
+!
+ip access-list standard snmp-stations
+permit {{ise_psn_ip_1}}
+permit {{ise_psn_ip_2}}
+exit
+
+ip device tracking
+ip device tracking probe delay 10
+device-sensor accounting
+device-sensor notify all-changes
+no macro auto monitor
+access-session template monitor
+
+!-> CDP Device Sensor
+cdp run
+device-sensor filter-list cdp list cdp_list
+  tlv name device-name
+  tlv name capabilities-type
+  tlv name version-type
+  tlv name platform-type
+  tlv name address-type
+device-sensor filter-spec cdp include list cdp_list
+
+!-> DHCP Device Sensor
+interface {{uplink_int_1}}
+ip dhcp snooping trust
+exit
+
+interface {{uplink_int_2}}
+ip dhcp snooping trust
+exit
+
+
+ip dhcp snooping vlan {{user_vlan}}
+ip dhcp snooping
+no ip dhcp snooping information option
+
+device-sensor filter-list dhcp list dhcp_list
+  option name host-name
+  option name parameter-request-list
+  option name class-identifier
+  option name client-identifier
+  option name requested-address
+device-sensor filter-spec dhcp include list dhcp_list
+
+!### - Global-Configuration-Completed-###
+
+!### - STOP! -###
+!### - HAVE YOU RUN THE show  COMMANDS -###
+
+!-###- Interface Monitor Mode "Multi-Auth" -###
+! interface range for a 3560cg-8
+  interface range GigabitEthernet0/1 - 8
+    shut
+    authentication open
+    authentication order dot1x mab
+    authentication priority dot1x mab
+    authentication host-mode multi-auth
+    authentication port-control auto
+    dot1x pae authenticator
+    mab
+    authentication violation restrict
+    dot1x timeout tx-period 7
+    dot1x max-reauth-req 3
+    authentication periodic
+    authentication timer reauthenticate server
+    authentication timer inactivity server dynamic
+    authentication control-direction in
+    authentication event fail action next-method
+    authentication event server dead action authorize vlan {{user_vlan}}
+    authentication event server dead action authorize voice
+    authentication event server alive action reinitialize
+    ip dhcp snooping limit rate 100
+    no shut
+
+exit
+exit
+!### - Interface-Configuration-Completed-###
+!###- END DEVICE CONFIGURATION -###
+!###- POST PING SWEEP -###
+
+!-> Capture Post-Configuration "shows"
+terminal length 0
+show  run
+show  cdp neighbors
+show  cdp neighbors detail
+show  inventory
+show  module
+show  version
+show  ip arp
+show  mac address-table
+show  interface status
+show clock
+terminal length 24
+
+!###- IF ALL TESTS ARE GOOD SAVE CONFIGURATION-###
+! write memory or copy running-config startup-config

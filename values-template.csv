@@ -1,0 +1,2 @@
+hostname,mgmt_ip,template,ise_psn_hostname_1,ise_psn_ip_1,ise_psn_hostname_2,ise_psn_ip_2,radius_key,radius_group,user_vlan,mgmt_interface,uplink_int_1,uplink_int_2,testuser,password
+,,4507-template.j2,,,,,,,,,,,,

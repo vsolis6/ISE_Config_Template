@@ -1,0 +1,148 @@
+!
+!#########################
+!  3850-template.j2
+!########################
+!Configuration for Device: {{hostname}}
+!
+
+username {{testuser}} secret 0 {{password}}
+
+!-> RADIUS Server
+radius server {{ise_psn_hostname_1}}
+  address ipv4 {{ise_psn_ip_1}} auth-port 1812 acct-port 1813
+  key {{radius_key}}
+  automate-tester username {{testuser}} ignore-acct-port probe-on
+
+radius server {{ise_psn_hostname_2}}
+  address ipv4 {{ise_psn_ip_2}} auth-port 1812 acct-port 1813
+  key {{radius_key}}
+  automate-tester username {{testuser}} ignore-acct-port probe-on
+
+!-> RADIUS Server Group
+aaa group server radius {{radius_group}}
+  server name {{ise_psn_hostname_1}}
+  server name {{ise_psn_hostname_2}}
+
+ip radius source-interface {{mgmt_interface}}
+
+aaa new-model
+aaa session-id common
+aaa authentication dot1x default group {{radius_group}}
+aaa authorization network default group {{radius_group}}
+aaa accounting dot1x default start-stop group {{radius_group}}
+aaa accounting update newinfo periodic 2880
+
+radius-server dead-criteria time 10 tries 3
+radius-server deadtime 15
+
+authentication critical recovery delay 1000
+radius-server attribute 6 on-for-login-auth
+radius-server attribute 8 include-in-access-req
+radius-server attribute 25 access-request include
+radius-server attribute 31 mac format ietf upper-case
+radius-server attribute 31 send nas-port-detail mac-only
+
+radius-server vsa send authentication
+radius-server vsa send accounting
+
+aaa server radius dynamic-author
+  client {{ise_psn_ip_1}} server-key 0 {{radius_key}}
+  client {{ise_psn_ip_2}} server-key 0 {{radius_key}}
+
+  !### - STOP TEST RADIUS-###
+  test aaa group I{{radius_group}} server {{ise_psn_ip_1}} {{testuser}} {{password}} legacy
+  test aaa group I{{radius_group}} server {{ise_psn_ip_2}} r{{testuser}} {{password}}legacy
+
+authentication mac-move permit
+dot1x system-auth-control
+dot1x critical eapol
+access-session acl default passthrough
+
+! Logging
+epm logging
+logging monitor informational
+logging origin-id ip
+logging source-interface {{mgmt_interface}}
+logging host 207.130.185.233 transport udp port 20514
+logging host 207.130.185.234  transport udp port 20514
+
+! SMNP
+mac address-table notification change
+mac address-table notification mac-move
+mac address-table notification change interval 0
+snmp-server enable traps mac-notification change move threshold
+snmp-server enable traps mac-notification change
+snmp-server host {{ise_psn_ip_1}} version 2c jkti5ht8ep90 mac-notification
+snmp-server host {{ise_psn_ip_2}} version 2c jkti5ht8ep90 mac-notification
+!
+ip access-list standard snmp-stations
+permit {{ise_psn_ip_1}}
+permit {{ise_psn_ip_2}}
+
+
+ip device tracking
+ip device tracking probe auto-source
+device-sensor accounting
+device-sensor notify all-changes
+no macro auto monitor
+access-session template monitor
+
+cdp run
+device-sensor filter-list cdp list cdp_list
+  tlv name device-name
+  tlv name capabilities-type
+  tlv name version-type
+  tlv name platform-type
+  tlv name address-type
+device-sensor filter-spec cdp include list cdp_list
+
+!-> DHCP Device Sensor
+interface {{uplink_int_1}}
+ip dhcp snooping trust
+interface {{uplink_int_2}}
+ip dhcp snooping trust
+
+ip dhcp snooping vlan {{user_vlan}}
+ip dhcp snooping glean
+no ip dhcp snooping information option
+
+device-sensor filter-list dhcp list dhcp_list
+  option name host-name
+  option name parameter-request-list
+  option name class-identifier
+  option name client-identifier
+  option name requested-address
+device-sensor filter-spec dhcp include list dhcp_list
+
+
+Switch Module/Stack Count: {{sw_modules}}
+{% set sw_num = sw_modules | int %}
+Number of Access Ports: {{access_ports}}
+{% set sw_ports = access_ports | int %}
+!-###- Interface Monitor Mode "Multi-Auth" -###
+!
+{% for id in range(0,sw_num) -%}
+{% for n in range(0,sw_ports) -%}
+!
+interface gi {{ id+1 }}/0/{{n+1}}
+  authentication open
+  authentication order dot1x mab
+  authentication priority dot1x mab
+  authentication host-mode multi-auth
+  authentication port-control auto
+  dot1x pae authenticator
+  mab
+  authentication violation restrict
+  dot1x timeout tx-period 7
+  dot1x max-reauth-req 3
+  authentication periodic
+  authentication timer reauthenticate server
+  authentication timer inactivity server dynamic
+  authentication control-direction in
+  authentication event fail action next-method
+  authentication event server dead action authorize vlan {{user_vlan}}
+  authentication event server dead action authorize voice
+  authentication event server alive action reinitialize
+  ip dhcp snooping limit rate 100
+{% endfor %}
+{% endfor %}
